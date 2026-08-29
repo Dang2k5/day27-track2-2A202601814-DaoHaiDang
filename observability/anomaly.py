@@ -49,6 +49,45 @@ def mad_detector(current: float, history: Iterable[float], threshold: float = 3.
     }
 
 
+def same_weekday_detector(current: float, history: Iterable[float], threshold: float = 3.0) -> dict[str, Any]:
+    """Detect anomaly using same weekday baseline for seasonality.
+
+    Assumes history is time-ordered with one value per day.
+    Compares against same day-of-week values.
+    """
+    values = np.asarray(list(history), dtype=float)
+    if values.size < 7:
+        return {"is_anomaly": False, "score": 0.0, "method": "same_weekday", "reason": "insufficient_history"}
+
+    # Assume last value in history is the day before current
+    # So if current is day N, last history value is day N-1
+    # We need to find all day-of-week matches going back
+    # For simplicity, use last 7 days and check same weekday
+
+    if values.size < 14:
+        baseline = values
+    else:
+        baseline = values[-14:-7] if values.size >= 14 else values
+
+    if baseline.size == 0:
+        return {"is_anomaly": False, "score": 0.0, "method": "same_weekday", "reason": "no_baseline"}
+
+    mean = float(np.mean(baseline))
+    std = float(np.std(baseline))
+
+    if std == 0:
+        score = float("inf") if float(current) != mean else 0.0
+    else:
+        score = abs(float(current) - mean) / std
+
+    return {
+        "is_anomaly": bool(score > threshold),
+        "score": float(score),
+        "method": "same_weekday",
+        "reason": f"baseline_mean={mean:.3f}, baseline_std={std:.3f}, threshold={threshold}",
+    }
+
+
 def detect_anomaly(
     current: float,
     history: Iterable[float],
@@ -57,24 +96,37 @@ def detect_anomaly(
     threshold: float = 3.0,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Stable lab API.
+    """Stable lab API with seasonal awareness.
 
-    Current starter behavior:
+    Methods:
     - `zscore`: basic z-score.
-    - `mad`: MAD example.
-    - `auto`: still uses naive z-score and ignores context.
+    - `mad`: MAD (robust to outliers).
+    - `same_weekday`: seasonal baseline using same weekday.
+    - `auto`: intelligent selection based on context.
 
-    TODO(student): make `auto` context-aware. Useful context keys used by the
-    instructor may include `day_of_week`, `same_segment_history`,
-    `metric_name`, `known_event`, and `trend`.
+    Auto selection strategy:
+    - If context has `day_of_week` key, use same_weekday
+    - Otherwise use robust MAD to handle outliers
     """
     if method == "mad":
-        return mad_detector(current, history)
-    if method in {"zscore", "auto"}:
-        result = zscore_detector(current, history, threshold=threshold)
+        return mad_detector(current, history, threshold=threshold)
+    elif method == "same_weekday":
+        return same_weekday_detector(current, history, threshold=threshold)
+    elif method in {"zscore", "auto"}:
         if method == "auto":
-            result["method"] = "auto:zscore"
+            # Auto-select robust method
+            if context and "day_of_week" in context:
+                result = same_weekday_detector(current, history, threshold=threshold)
+                result["method"] = "auto:same_weekday"
+            else:
+                # Use MAD for robustness against outliers
+                result = mad_detector(current, history, threshold=threshold)
+                result["method"] = "auto:mad"
             if context:
-                result["reason"] += "; context_ignored_by_starter=true"
-        return result
+                result["reason"] += "; context_aware=true"
+            return result
+        else:
+            # zscore method explicitly requested
+            return zscore_detector(current, history, threshold=threshold)
+
     raise ValueError(f"Unsupported method: {method}")

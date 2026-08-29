@@ -37,15 +37,50 @@ def evaluate_multiwindow_burn(
     long_window_burn: float,
     policy: str = "starter",
 ) -> dict[str, Any]:
-    """TODO(student): implement a real multi-window burn-rate policy.
+    """Multi-window burn-rate policy to distinguish transient spikes from sustained outages.
 
-    Starter intentionally never pages. Hidden evaluation contains cases that
-    require distinguishing sustained fast burn from a transient spike.
+    Policy thresholds (inspired by Google SRE playbook):
+    - Fast burn (6h): burn_rate > 10 on short window triggers page
+    - Slow burn (30d): burn_rate > 0.1 on long window triggers page
+    - Both sustained: very urgent
+
+    Returns alerting decision and severity.
     """
+    page = False
+    severity = "info"
+    reason = ""
+
+    if policy in {"starter", "google_sre"}:
+        # Fast burn threshold: 100% error budget in 6 hours
+        # long_window represents 30-day window, short represents 1-hour window
+        # If 1-hour burn is > 10x sustainable rate AND 30-day burn is sustained
+        fast_burn_threshold = 10.0  # 10x baseline over 1-hour
+        slow_burn_threshold = 0.1   # 10% baseline over 30-day
+
+        if short_window_burn > fast_burn_threshold and long_window_burn > slow_burn_threshold:
+            # Both short and long windows are elevated: likely real incident
+            page = True
+            severity = "critical"
+            reason = f"sustained_fast_burn: short={short_window_burn:.2f}, long={long_window_burn:.2f}"
+        elif short_window_burn > fast_burn_threshold and short_window_burn < 100:
+            # Fast short burn but long window normal: transient spike, only warn
+            page = False
+            severity = "warning"
+            reason = f"transient_spike: short={short_window_burn:.2f} (fast but long window ok)"
+        elif long_window_burn > slow_burn_threshold:
+            # Slow burn sustained over long period: background issues, need investigation
+            page = True
+            severity = "warning"
+            reason = f"slow_sustained_burn: long={long_window_burn:.2f}"
+        else:
+            severity = "info"
+            reason = "all_windows_healthy"
+
     return {
-        "page": False,
-        "severity": "info",
-        "reason": "starter_policy_not_implemented",
+        "page": page,
+        "severity": severity,
+        "reason": reason,
         "short_window_burn": short_window_burn,
         "long_window_burn": long_window_burn,
+        "thresholds": {"fast_burn": 10.0, "slow_burn": 0.1},
     }

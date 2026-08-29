@@ -10,3 +10,6 @@ models:
       - name: daily_revenue
         data_tests:
           - not_null
+      - name: completed_order_rows
+        data_tests:
+          - not_null

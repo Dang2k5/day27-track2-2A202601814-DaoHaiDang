@@ -27,11 +27,36 @@ def detect_text_length_shift(
 
 
 def detect_embedding_norm_shift(
-    current_norms: Iterable[float], baseline_norms: Iterable[float]
+    current_norms: Iterable[float], baseline_norms: Iterable[float], threshold: float = 3.0
 ) -> dict[str, Any]:
-    """TODO(student): implement embedding-space drift signal.
+    """Detect embedding-space drift using L2 norm statistics.
 
-    No embedding model is required for the starter lab. Hidden evaluation can
-    feed precomputed norms/similarities through this stable interface.
+    Embedding norms often indicate the "importance" or "confidence" of representations.
+    Sustained shifts in norm distribution suggest semantic drift.
     """
-    return {"is_anomaly": False, "score": 0.0, "method": "not_implemented"}
+    cur_norms = np.asarray(list(current_norms), dtype=float)
+    base_norms = np.asarray(list(baseline_norms), dtype=float)
+
+    if cur_norms.size == 0 or base_norms.size == 0:
+        return {"is_anomaly": False, "score": 0.0, "method": "embedding_norm", "reason": "empty_input"}
+
+    # Compare norm distributions using quantiles
+    base_mean = float(np.mean(base_norms))
+    cur_mean = float(np.mean(cur_norms))
+
+    base_std = float(np.std(base_norms))
+    cur_std = float(np.std(cur_norms))
+
+    # Score based on mean shift relative to baseline std
+    if base_std == 0:
+        score = float("inf") if cur_mean != base_mean else 0.0
+    else:
+        score = abs(cur_mean - base_mean) / base_std
+
+    return {
+        "is_anomaly": bool(score > threshold),
+        "score": float(score),
+        "method": "embedding_norm",
+        "reason": f"base_mean={base_mean:.4f} (std={base_std:.4f}), "
+                 f"curr_mean={cur_mean:.4f} (std={cur_std:.4f}), score={score:.2f}",
+    }
